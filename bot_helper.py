@@ -16,8 +16,9 @@ def download_image(comic_data):
     img_name = os.path.join('images', f'{img_number}.png')
     img_alt = comic_data['alt']
     title = comic_data['title']
+    os.makedirs('images', exist_ok=True)
     with open(img_name, 'wb') as img_file:
         img_file.write(img_response.content)
     print(f'Изображение {img_number} сохранено в {img_name}.')
-    return {"img_alt":img_alt,"title":title,"img_name":img_name}
+    return {"img_alt": img_alt, "title": title, "img_name": img_name}
 

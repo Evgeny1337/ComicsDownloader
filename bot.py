@@ -6,6 +6,7 @@ import random
 import logging
 from bot_helper import get_comic, download_image
 import os
+
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
     )
