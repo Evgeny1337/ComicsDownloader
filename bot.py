@@ -1,54 +1,215 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-from dotenv import load_dotenv
-from os import environ, path
-import random
-from bot_helper import get_comic, download_image
-import os
-from tempfile import NamedTemporaryFile
+
 import logging
+import os
+import random
+import threading
+import time
+import telegram
+from dotenv import load_dotenv, find_dotenv, set_key
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
+from bot_helper import get_comic, download_image
+from io import BytesIO
 
-logger = logging.getLogger(__file__)
 
-async def get_random_comic():
-    total_comics = get_comic('https://xkcd.com/info.0.json')['num']
-    random_number = random.randrange(0, total_comics)
-    comic_data = get_comic(f'https://xkcd.com/{random_number}/info.0.json')
-    image_data = download_image(comic_data)
-    return image_data
+logger = logging.getLogger(__name__)
 
-async def send_comic(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    max_photo_size = 20 * 1024 * 1024
-    image_data = await get_random_comic()
-    img_name = image_data['img_name']
-    img_content = image_data['img_content']
-    img_description = image_data['img_alt']
-    img_size = len(img_content)
-    if img_size == 0 or img_size > max_photo_size:
-        await update.message.reply_text(f"Недопустимый размер изображения: {img_size} байт")
-        return
+
+MAX_PHOTO_SIZE = 20 * 1024 * 1024  
+INPUT_MANUALLY = 1
+COMIC_BASE_URL = 'https://xkcd.com'
+INTERVAL_SECONDS = 3600  
+
+
+active_threads = {} 
+
+
+def save_chat_id(chat_id: str):
+    env_path = find_dotenv()
+    set_key(env_path, 'TG_CHAT_ID', chat_id)
+    os.environ['TG_CHAT_ID'] = chat_id
+
+
+def get_main_keyboard():
+    keyboard = [
+        ['Выбрать данный чат для получения комиксов'],
+        ['Ввести вручную id чата для отправки комиксов']
+    ]
+    return telegram.ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+
+def get_random_comic():
+    total_comics = get_comic(f'{COMIC_BASE_URL}/info.0.json')['num']
+    random_number = random.randint(1, total_comics) 
+    comic_data = get_comic(f'{COMIC_BASE_URL}/{random_number}/info.0.json')
+    return download_image(comic_data)
+
+
+def create_scheduler(bot: telegram.Bot, chat_id: str):
+    stop_previous_thread(chat_id)
+
+    stop_event = threading.Event()
     
-    with NamedTemporaryFile(suffix=".png", delete=True) as tmp_file:
-        tmp_file.write(img_content)
-        tmp_file.flush()
-        tmp_file.seek(0)
+    thread = threading.Thread(
+        target=send_comic_periodically,
+        args=(bot, chat_id, stop_event),
+        daemon=True
+    )
+    thread.start()
+    
+    active_threads[chat_id] = stop_event
+    logger.info(f"Запущен планировщик для чата {chat_id}")
 
-        await update.message.reply_photo(
-            photo=tmp_file,
-            caption=img_description,
-            filename=os.path.basename(img_name)
+
+def stop_previous_thread(chat_id: str):
+    if chat_id in active_threads:
+        active_threads[chat_id].set()
+        del active_threads[chat_id]
+        logger.info(f"Остановлен предыдущий поток для чата {chat_id}")
+
+
+def send_comic(bot: telegram.Bot, chat_id: str) -> None:
+    try:
+        comic_data = get_random_comic()
+    except Exception as e:
+        logger.error(f"Ошибка при получении комикса: {e}")
+        bot.send_message(
+            chat_id=chat_id,
+            text="Не удалось получить комикс. Попробуйте позже."
+        )
+        return
+
+    img_name = comic_data['img_name']
+    img_bytes = comic_data['img_content']
+    caption = comic_data['img_alt']
+
+    if len(img_bytes) > MAX_PHOTO_SIZE:
+        bot.send_message(
+            chat_id=chat_id,
+            text=f"Размер изображения слишком большой: {len(img_bytes) // 1024} KB"
+        )
+        return
+    try:
+        bot.send_photo(
+            chat_id=chat_id,
+            photo=BytesIO(img_bytes),
+            caption=caption,
+            filename=img_name
+        )
+    except telegram.error.TelegramError as e:
+        logger.error(f"Ошибка отправки: {e}")
+        bot.send_message(
+            chat_id=chat_id,
+            text=f"Ошибка отправки комикса: {str(e)}"
+        )
+
+
+def send_comic_periodically(bot: telegram.Bot, chat_id: str, stop_event: threading.Event):
+    while not stop_event.is_set():
+        send_comic(bot, chat_id)
+        stop_event.wait(timeout=INTERVAL_SECONDS)
+
+
+def start(update: telegram.Update, context: CallbackContext):
+    update.message.reply_text(
+        'Бот для отправки случайных XKCD комиксов',
+        reply_markup=get_main_keyboard()
+    )
+
+
+def request_manual_input(update: telegram.Update, context: CallbackContext):
+    update.message.reply_text(
+        "Введите ID чата (группы или канала) для отправки комиксов:"
+    )
+    return INPUT_MANUALLY
+
+
+def use_current_chat(update: telegram.Update, context: CallbackContext):
+    chat_id = str(update.message.chat.id)
+    save_chat_id(chat_id)
+    create_scheduler(context.bot, chat_id)
+    update.message.reply_text(
+        f"Теперь комиксы будут приходить сюда! (ID: {chat_id})"
+    )
+
+
+def handle_manual_input(update: telegram.Update, context: CallbackContext) -> int:
+    chat_id = update.message.text.strip()
+    
+    try:
+        context.bot.get_chat(chat_id)
+        save_chat_id(chat_id)
+        create_scheduler(context.bot, chat_id)
+        update.message.reply_text(
+            f"Настройки сохранены! Комиксы будут отправляться в чат: {chat_id}",
+            reply_markup=get_main_keyboard()
+        )
+    except telegram.error.TelegramError as e:
+        logger.error(f"Невалидный chat_id: {chat_id}, ошибка: {e}")
+        update.message.reply_text(
+            "Ошибка: Недопустимый ID чата или бот не добавлен в чат",
+            reply_markup=get_main_keyboard()
         )
     
+    return ConversationHandler.END
+
+
+def stop_bot(update: telegram.Update, context: CallbackContext):
+    chat_id = str(update.message.chat.id)
+    stop_previous_thread(chat_id)
+    update.message.reply_text("Рассылка комиксов остановлена!")
+
 
 def main():
-    load_dotenv()
-    tg_token = environ['TG_TOKEN']
-    application = Application.builder().token(tg_token).build()
-    application.add_handler(CommandHandler('get', send_comic))
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    load_dotenv(override=True)
+    tg_token = os.getenv('TG_TOKEN')
+    
+    if not tg_token:
+        logger.error("Токен бота не найден!")
+        return
+
+    tg_chat_id = os.getenv('TG_CHAT_ID', '').strip()
+    updater = Updater(token=tg_token, use_context=True)
+    
+    if tg_chat_id:
+        create_scheduler(updater.bot, tg_chat_id)
+
+    dp = updater.dispatcher
+    dp.add_handler(CommandHandler('start', start))
+    dp.add_handler(CommandHandler('stop', stop_bot))
+    
+    conv_handler = ConversationHandler(
+        entry_points=[
+            MessageHandler(
+                Filters.regex(r'^Ввести вручную id чата'),
+                request_manual_input
+            )
+        ],
+        states={
+            INPUT_MANUALLY: [
+                MessageHandler(Filters.text & ~Filters.command, handle_manual_input)
+            ]
+        },
+        fallbacks=[]
+    )
+    dp.add_handler(conv_handler)
+    
+    dp.add_handler(MessageHandler(
+        Filters.regex(r'^Выбрать данный чат'),
+        use_current_chat
+    ))
+
+    updater.start_polling()
+    logger.info("Бот запущен и работает...")
+    updater.idle()
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.ERROR)
-    logger.setLevel(logging.DEBUG)
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
     main()
