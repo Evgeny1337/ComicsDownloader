@@ -3,7 +3,6 @@ import logging
 import os
 import random
 import threading
-import time
 import telegram
 from dotenv import load_dotenv, find_dotenv, set_key
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler, CallbackContext
