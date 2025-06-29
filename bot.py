@@ -21,6 +21,20 @@ INTERVAL_SECONDS = 3600
 
 active_threads = {} 
 
+class MyLogsHandler(logging.Handler):
+    def __init__(self, bot: telegram.Bot, chatid:str = None, level = 0):
+        super().__init__(level)
+        self.bot = bot
+        self.chatid = chatid
+        
+    def emit(self, record):
+        log_entry = self.format(record)
+        chat_id = self.chatid
+        if chat_id:
+            self.bot.send_message(chat_id=chat_id, text=log_entry)
+
+    def set_chatid(self, chatid):
+        self.chatid = chatid
 
 def save_chat_id(chat_id: str):
     env_path = find_dotenv()
@@ -128,11 +142,16 @@ def request_manual_input(update: telegram.Update, context: CallbackContext):
 
 def use_current_chat(update: telegram.Update, context: CallbackContext):
     chat_id = str(update.message.chat.id)
-    save_chat_id(chat_id)
-    create_scheduler(context.bot, chat_id)
-    update.message.reply_text(
-        f"Теперь комиксы будут приходить сюда! (ID: {chat_id})"
-    )
+    try:
+        context.bot.get_chat(chat_id)
+        save_chat_id(chat_id)
+        create_scheduler(context.bot, chat_id)
+        logger_handler = context.bot_data.get('logger_handler')
+        logger_handler.set_chatid(chat_id)
+        logger.info(f"Теперь комиксы будут приходить сюда! (ID: {chat_id}")
+    except telegram.error.TelegramError as error:
+        error_message = f"Ошибка доступа к чату {chat_id}: {error.message}"
+        logger.error(error_message)
 
 
 def handle_manual_input(update: telegram.Update, context: CallbackContext) -> int:
@@ -165,18 +184,25 @@ def stop_bot(update: telegram.Update, context: CallbackContext):
 def main():
     load_dotenv(override=True)
     tg_token = os.getenv('TG_TOKEN')
+    logger.setLevel(logging.DEBUG)
     
     if not tg_token:
-        logger.error("Токен бота не найден!")
+        logger.critical("Токен бота не найден!")
         return
 
     tg_chat_id = os.getenv('TG_CHAT_ID', '').strip()
     updater = Updater(token=tg_token, use_context=True)
+
+    logger_handler = MyLogsHandler(bot=updater.bot, chatid=tg_chat_id)
+    logger.addHandler(logger_handler)
+    
+    dp = updater.dispatcher
+    dp.bot_data['logger_handler'] = logger_handler
     
     if tg_chat_id:
         create_scheduler(updater.bot, tg_chat_id)
 
-    dp = updater.dispatcher
+    
     dp.add_handler(CommandHandler('start', start))
     dp.add_handler(CommandHandler('stop', stop_bot))
     
