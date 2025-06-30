@@ -230,10 +230,12 @@ def main():
         Filters.regex(r'^Выбрать данный чат'),
         use_current_chat
     ))
-
-    updater.start_polling()
-    logger.info("Бот запущен и работает...")
-    updater.idle()
+    try:
+        updater.start_polling()
+        logger.info("Бот запущен и работает...")
+        updater.idle()
+    except Exception as err:
+        logger.error(err, exc_info=True)
 
 
 if __name__ == '__main__':
