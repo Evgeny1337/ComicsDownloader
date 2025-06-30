@@ -10,7 +10,11 @@ from bot_helper import get_comic, download_image
 from io import BytesIO
 
 
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
 
 
 MAX_PHOTO_SIZE = 20 * 1024 * 1024  
@@ -233,8 +237,4 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.DEBUG
-    )
     main()
