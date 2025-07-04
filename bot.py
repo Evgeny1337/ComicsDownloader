@@ -78,12 +78,6 @@ def send_comic_periodically(context: CallbackContext):
 
 
 
-def start(update: telegram.Update, context: CallbackContext):
-    chat_id = update.message.chat_id
-    current_chat_id = context.bot_data.get('tg_chat_id')
-    update.message.reply_text("Бот для отправки комиксов, id вашего чата {}".format(chat_id))
-    if not current_chat_id:
-         update.message.reply_text("id чата для отправки комиксов не задан")
 
 
 
@@ -93,13 +87,11 @@ def main():
     tg_token = os.getenv('TG_TOKEN')
     tg_chat_id = os.getenv('TG_CHAT_ID', '').strip()
     updater = Updater(token=tg_token, use_context=True)
-
     dp = updater.dispatcher
     dp.bot_data['tg_chat_id'] = tg_chat_id
-    dp.add_handler(CommandHandler('start', start))
-    logging_bot = telegram.Bot(token=tg_token)
+    bot = dp.bot
 
-    logger.addHandler(LogsHandler(tg_chat_id,logging_bot))
+    logger.addHandler(LogsHandler(tg_chat_id,bot))
     logger.setLevel(logging.INFO)
     logger.info('Рассылка запущена')
 
