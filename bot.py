@@ -12,7 +12,7 @@ from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
-class MyLogsHandler(logging.Handler):
+class LogsHandler(logging.Handler):
 
     def __init__(self,chat_id:str, bot: telegram.ext.ExtBot, level = 0):
         super().__init__(level)
@@ -34,25 +34,19 @@ COMIC_BASE_URL = 'https://xkcd.com'
 INTERVAL_SECONDS = 3600  
 
 
-def save_chat_id(chat_id: str):
-    env_path = find_dotenv()
-    set_key(env_path, 'TG_CHAT_ID', chat_id)
-    os.environ['TG_CHAT_ID'] = chat_id
-
-
-
 def get_random_comic():
     total_comics = get_comic(f'{COMIC_BASE_URL}/info.0.json')['num']
     random_number = random.randint(1, total_comics) 
-    comic_details = get_comic(f'{COMIC_BASE_URL}/{random_number}/info.0.json')
-    return download_image(comic_details)
+    comic_info = get_comic(f'{COMIC_BASE_URL}/{random_number}/info.0.json')
+    return comic_info
 
 
 
 
 def send_comic(bot: telegram.Bot, chat_id: str) -> None:
     try:
-        comic_details = get_random_comic()
+        comic_info = get_random_comic()
+        image_details = download_image(comic_info)
     except Exception as e:
         logger.error(f"Ошибка при получении комикса: {e}")
         bot.send_message(
@@ -61,9 +55,9 @@ def send_comic(bot: telegram.Bot, chat_id: str) -> None:
         )
         return
 
-    img_name = comic_details['img_name']
-    img_bytes = comic_details['img_content']
-    caption = comic_details['img_alt']
+    img_name = image_details['img_name']
+    img_bytes = image_details['img_content']
+    caption = image_details['img_alt']
 
     bot.send_photo(
             chat_id=chat_id,
@@ -105,7 +99,7 @@ def main():
     dp.add_handler(CommandHandler('start', start))
     logging_bot = telegram.Bot(token=tg_token)
 
-    logger.addHandler(MyLogsHandler(tg_chat_id,logging_bot))
+    logger.addHandler(LogsHandler(tg_chat_id,logging_bot))
     logger.setLevel(logging.INFO)
     logger.info('Рассылка запущена')
 
