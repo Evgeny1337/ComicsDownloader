@@ -10,28 +10,9 @@ import telegram.ext
 from bot_helper import get_comic, download_image
 from io import BytesIO
 
-logger = logging.getLogger(__name__)
-
-class LogsHandler(logging.Handler):
-
-    def __init__(self,chat_id:str, bot: telegram.ext.ExtBot, level = 0):
-        super().__init__(level)
-        format = logging.Formatter("%(process)d %(levelname)s %(message)s")
-        self.setFormatter(format)
-        self.bot = bot
-        self.chat_id = chat_id
-
-    def emit(self, record):
-        log_entry = self.format(record)
-        if self.chat_id:
-            self.bot.send_message(chat_id=self.chat_id, text=log_entry)
-
-    def set_chatid(self,chat_id):
-        self.chat_id = chat_id
-
 
 COMIC_BASE_URL = 'https://xkcd.com'
-INTERVAL_SECONDS = 3600  
+INTERVAL_SECONDS = 3 
 
 
 def get_random_comic():
@@ -48,7 +29,6 @@ def send_comic(bot: telegram.Bot, chat_id: str) -> None:
         comic_info = get_random_comic()
         image_details = download_image(comic_info)
     except Exception as e:
-        logger.error(f"Ошибка при получении комикса: {e}")
         bot.send_message(
             chat_id=chat_id,
             text="Не удалось получить комикс. Попробуйте позже."
@@ -73,8 +53,8 @@ def send_comic_periodically(context: CallbackContext):
         try:
             context.bot.get_chat(chat_id)
             send_comic(context.bot, chat_id)
-        except telegram.error.TelegramError as err:
-            logger.warning('В чат с id {} не возможно отправить сообщение\n\n {}'.format(chat_id,err))
+        except:
+            pass
 
 
 
@@ -84,16 +64,11 @@ def send_comic_periodically(context: CallbackContext):
 
 def main():
     load_dotenv(override=True)
-    tg_token = os.getenv('TG_TOKEN')
-    tg_chat_id = os.getenv('TG_CHAT_ID', '').strip()
+    tg_token = os.environ['TG_TOKEN']
+    tg_chat_id = os.environ['TG_CHAT_ID']
     updater = Updater(token=tg_token, use_context=True)
     dp = updater.dispatcher
     dp.bot_data['tg_chat_id'] = tg_chat_id
-    bot = dp.bot
-
-    logger.addHandler(LogsHandler(tg_chat_id,bot))
-    logger.setLevel(logging.INFO)
-    logger.info('Рассылка запущена')
 
     job_queue = updater.job_queue
     job_queue.run_repeating(
@@ -102,11 +77,7 @@ def main():
         first=0,
         context={'tg_chat_id':tg_chat_id}
     )
-    try:
-        while True:
-            updater.start_polling()
-    except Exception:
-        logger.warning('Рассылка приостановллена')
+    updater.start_polling()
 
 
 
