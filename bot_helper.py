@@ -19,3 +19,5 @@ def download_image(comic_data):
   
     return {"img_alt": img_alt, "title": title, "img_name": img_name, "img_content":img_response.content}
 
+
+

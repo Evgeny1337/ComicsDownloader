@@ -2,14 +2,14 @@
 import logging
 import os
 import random
-import threading
 import telegram
-from dotenv import load_dotenv, find_dotenv, set_key
-from telegram.ext import Updater, CommandHandler, CallbackContext
-import telegram.ext
+from dotenv import load_dotenv
+from telegram.ext import Updater, CallbackContext
 from bot_helper import get_comic, download_image
 from io import BytesIO
 
+
+logger = logging.getLogger(__name__)
 
 COMIC_BASE_URL = 'https://xkcd.com'
 INTERVAL_SECONDS = 3 
@@ -17,10 +17,9 @@ INTERVAL_SECONDS = 3
 
 def get_random_comic():
     total_comics = get_comic(f'{COMIC_BASE_URL}/info.0.json')['num']
-    random_number = random.randint(1, total_comics) 
+    random_number = random.randint(1, total_comics)
     comic_info = get_comic(f'{COMIC_BASE_URL}/{random_number}/info.0.json')
     return comic_info
-
 
 
 
@@ -31,7 +30,7 @@ def send_comic(bot: telegram.Bot, chat_id: str) -> None:
     except Exception as e:
         bot.send_message(
             chat_id=chat_id,
-            text="Не удалось получить комикс. Попробуйте позже."
+            text="Не удалось получить комикс."
         )
         return
 
@@ -49,17 +48,11 @@ def send_comic(bot: telegram.Bot, chat_id: str) -> None:
 
 def send_comic_periodically(context: CallbackContext):
     chat_id = context.bot_data.get('tg_chat_id')
-    if chat_id:
-        try:
-            context.bot.get_chat(chat_id)
-            send_comic(context.bot, chat_id)
-        except:
-            pass
-
-
-
-
-
+    try:
+        context.bot.get_chat(chat_id)
+        send_comic(context.bot, chat_id)
+    except:
+        logger.fatal('Ошибка отправки комикса')
 
 
 def main():
@@ -77,7 +70,8 @@ def main():
         first=0,
         context={'tg_chat_id':tg_chat_id}
     )
-    updater.start_polling()
+    while True:
+        updater.start_polling()
 
 
 
